@@ -1,0 +1,147 @@
+---
+title: "MachineLearningProject"
+author: "Navnit Belur"
+date: "May 24, 2015"
+output: html_document
+---
+
+
+
+Load the packages.
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(rattle)
+set.seed(42)
+```
+
+INTRODUCTION
+
+This project looks at data captured from accelerometers on the bodies of participants. The aim is to classify for the data sets the actual activity being performed. 
+
+GETTING THE DATA
+
+Load the training and test data sets. They are available at the below locations:
+
+Training data set: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+Testing data set: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r}
+#training <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"))
+#testing <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"))
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+dim(training)
+dim(testing)
+```
+
+The dependent variable in the data set is "classe" - the one we'd like to predict. This is a classification problem. We need to discover what other variables in the data set are the best candidates to use to train the prediction algorithm. 
+
+Not all of the 159 variables in the data set are probably required. For instance the first 6 columns include usernames and timestamps that by intuition do not lend themselves into the prediction, so we can safely remove them. 
+
+
+DATA CLEANING
+
+Remove the first 5 columns as they are are information about users and also timestamps of the actvities. 
+
+```{r}
+training <- select(training, -X, -user_name, -raw_timestamp_part_1, -raw_timestamp_part_2, -cvtd_timestamp)
+dim(training)
+```
+
+Remove any "zero-variance predictors" that exist in the data set. Since these data do not vary, they are not very useful in generating the model. For this we will use the nearZeroVar function. 
+
+```{r}
+nzv <- nearZeroVar(training)
+training <- training[ , -nzv]
+dim(training)
+```
+
+A lot of columns contain too many NAs to be considered for the model. We can remove such columns by removing those that have more than a threshold percentage (say 80% NAs). So we keep columns that contain >20%
+
+```{r}
+training <- training[, colSums(is.na(training)) < (0.8 * nrow(training))]
+dim(training)
+```
+
+After the cleaning we've done, the number of variables from the original training set has gone down from 160 to 54 - the features we will use to create the model are:
+
+```{r}
+names(training)
+```
+
+DATA PARTITIONING
+
+We'll use 70% of the avaialble "training" data to do the actual training and the other 30% for validation of the training as follows. 
+
+
+```{r}
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+validation <- training[-inTrain, ]
+training <- training[inTrain, ]
+dim(training)
+dim(validation)
+```
+
+
+MACHINE LEARNING ALGORITHM
+
+Model Fit 1
+
+Using trees.
+
+```{r}
+rpartTree <- train(
+                        classe ~ ., 
+                        method = "rpart", 
+                        data = training
+                  )
+print(rpartTree$finalModel)
+fancyRpartPlot(rpartTree$finalModel)
+
+rpartTreePredictions <- predict(rpartTree$finalModel, newdata = validation, type = "class")
+confusionMatrix(rpartTreePredictions, validation$classe)
+```
+
+OK, so, looking at the confustion matrix, we see that the accuracy of this model is only about 55%, so we definitely need a more accurate model. 
+
+Model Fit 2
+
+This time using boosting. Hopefully, this will be a more accurate model than the first one. 
+
+
+```{r}
+boostFit <- train(
+                  classe ~ ., 
+                  method = "gbm", 
+                  data = training, 
+                  verbose = FALSE
+                  )
+boostPredictions <- predict(boostFit, newdata = validation)
+boostConfusionMatrix <- confusionMatrix(boostPredictions, validation$classe)
+boostConfusionMatrix
+```
+
+OK, so this model has a much better accuracy (close to 99%), so this is the one we'll use for the prediction against the actual test data set. 
+
+TESTING and RESULTS
+
+Now we use the boosting model to make the classification predictions against the actual testing data set and output to text files as required. 
+
+```{r}
+answers <- as.character(predict(boostFit, newdata = testing))
+
+pml_write_files = function(x) {
+      n = length(x)
+      for(i in 1:n) {
+            filename = paste0("problem_id_", i, ".txt")
+            write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+      }
+}
+
+pml_write_files(answers)
+
+answers
+```
+
